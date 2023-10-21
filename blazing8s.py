@@ -42,6 +42,9 @@ class Card:
         # color = {1: "Red", 2: "Blue", 3: "Green", 4: "Yellow"}
         number = {1: "Swap", 11: "J", 13: "K"}
         return f"{self.suite.name} {number[self.number] if self.number in number else self.number}"
+    
+    def to_tuple(self):
+        return (self.number, self.suite)
 
 def get_random_card():
     num = random.choice(possible_cards)
@@ -60,7 +63,7 @@ class Player:
     def play(self, card: Card):
         self.hand.remove(card)
     
-    def choose_card(self, top: Card) -> Card:
+    def choose_card(self, top: Card, enemy_hand_length: int, draw: bool) -> Card:
         print("Your hand:")
         playable_cards = {}
         for i, card in enumerate(self.hand):
@@ -70,8 +73,14 @@ class Player:
                 playable_cards[i] = card
             else:
                 print()
-        choice = input("Which card would you like to play? (Enter the number or 'd' to draw): ")
-        if choice == "d":
+        if draw:
+            string = "Which card would you like to play? (Enter the number or 'd' to draw): "
+        else:
+            string = "Which card would you like to play? (Enter the number or 's' to skip): "
+        choice = input(string)
+        if draw and choice == "d":
+            return None
+        elif not draw and choice == "s":
             return None
         return self.hand[int(choice)]
 
@@ -109,8 +118,9 @@ class Game:
     def turn(self):
         card_played = False
         drew = False
+        other_player = self.player1 if self.current_player == self.player2 else self.player2
         while not card_played:
-            card = self.current_player.choose_card(self.top)
+            card = self.current_player.choose_card(self.top, len(other_player.hand), not drew)
             if card is not None:
                 self.current_player.play(card)
                 self.top = self.apply_card_effect(card)
