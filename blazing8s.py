@@ -22,13 +22,15 @@ import random
 from enum import Enum
 from typing import Self
 
-possible_cards = [1,2,3,4,5,6,7,8,9,10,11,13]
+possible_cards = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13]
+
 
 class Suite(Enum):
     RED = 1
     BLUE = 2
     GREEN = 3
     YELLOW = 4
+
 
 possible_suite = [Suite.RED, Suite.BLUE, Suite.GREEN, Suite.YELLOW]
 
@@ -37,18 +39,19 @@ class Card:
     def __init__(self, number: int, suite: Suite | None):
         self.number = number
         self.suite = suite
-    
+
     def __str__(self):
         # color = {1: "Red", 2: "Blue", 3: "Green", 4: "Yellow"}
         number = {1: "Swap", 11: "J", 13: "K"}
         return f"{self.suite.name if self.suite is not None else None} {number[self.number] if self.number in number else self.number}"
-    
+
     def to_tuple(self):
         return (self.number, self.suite)
 
     @staticmethod
     def from_tuple(tup: tuple):
         return Card(tup[0], tup[1])
+
 
 def get_random_card():
     num = random.choice(possible_cards)
@@ -57,32 +60,42 @@ def get_random_card():
         return Card(num, None)
     return Card(num, suite)
 
+
 class Player:
     def __init__(self, name: str):
         self.name = name
         self.hand: list[Card] = []
-    
+
     def draw(self):
         card = get_random_card()
         self.hand.append(card)
-    
+
     def play(self, card: Card):
         self.hand.remove(card)
-    
+
     def choose_card(self, top: Card, enemy_hand_length: int, drew: bool) -> Card:
         print("Your hand:")
         playable_cards = {}
         for i, card in enumerate(self.hand):
             print(f"{i}: {card}", end=" ")
-            if card.suite == top.suite or card.number == top.number or card.number == 8 or card.number == 1:
+            if (
+                card.suite == top.suite
+                or card.number == top.number
+                or card.number == 8
+                or card.number == 1
+            ):
                 print("Playable")
                 playable_cards[i] = card
             else:
                 print()
         if drew:
-            string = "Which card would you like to play? (Enter the number or 'd' to draw): "
+            string = (
+                "Which card would you like to play? (Enter the number or 'd' to draw): "
+            )
         else:
-            string = "Which card would you like to play? (Enter the number or 's' to skip): "
+            string = (
+                "Which card would you like to play? (Enter the number or 's' to skip): "
+            )
         choice = input(string)
         if drew and choice == "d":
             return None
@@ -96,9 +109,10 @@ class Player:
             print(f"{i}: {color}")
         choice = input("Which color would you like to change to? (Enter the number): ")
         return possible_suite[int(choice)]
-    
+
     def __str__(self):
         return f"{self.name}: {self.hand}"
+
 
 class RandomPlayer(Player):
     def choose_card(self, top: Card, enemy_hand_length: int, drew: bool) -> Card:
@@ -107,9 +121,15 @@ class RandomPlayer(Player):
             if card.number == 8:
                 suite = random.choice(possible_suite)
                 card.suite = suite
-            if card.suite == top.suite or card.number == top.number or card.number == 8 or card.number == 1:
+            if (
+                card.suite == top.suite
+                or card.number == top.number
+                or card.number == 8
+                or card.number == 1
+            ):
                 playable_cards.append(card)
         return random.choice(playable_cards)
+
 
 class Game:
     def __init__(self, player1: Player, player2: Player):
@@ -139,9 +159,13 @@ class Game:
     def turn(self):
         card_played = False
         drew = False
-        other_player = self.player1 if self.current_player == self.player2 else self.player2
+        other_player = (
+            self.player1 if self.current_player == self.player2 else self.player2
+        )
         while not card_played:
-            card = self.current_player.choose_card(self.top, len(other_player.hand), not drew)
+            card = self.current_player.choose_card(
+                self.top, len(other_player.hand), not drew
+            )
             if card is not None:
                 self.current_player.play(card)
                 self.top = self.apply_card_effect(card)
@@ -152,8 +176,10 @@ class Game:
                 self.current_player.draw()
                 drew = True
             if isinstance(self.current_player, AgentPlayer):
-                self.current_player.update_reward(self.top, len(other_player.hand), drew)
-    
+                self.current_player.update_reward(
+                    self.top, len(other_player.hand), drew
+                )
+
     def apply_card_effect(self, card: Card) -> Card:
         new_top_color = card.suite
         new_top_number = card.number
@@ -169,23 +195,50 @@ class Game:
             self.switch_player()
             self.current_player.draw()
             self.switch_player()
-        
+
         return Card(new_top_number, new_top_color)
 
-
     def switch_player(self):
-        self.current_player = self.player1 if self.current_player == self.player2 else self.player2
+        self.current_player = (
+            self.player1 if self.current_player == self.player2 else self.player2
+        )
 
     def __str__(self):
         return f"Player 1: {self.player1}\nPlayer 2: {self.player2}"
 
 
 class Agent:
-    def __init__(self, epsilon: float = 0.1, alpha: float = 0.5, gamma: float = 0.9):
+    def __init__(
+        self,
+        epsilon: float = 0.1,
+        alpha: float = 0.5,
+        gamma: float = 0.9,
+        file_name: str | None = None,
+    ):
         self.epsilon = epsilon
         self.alpha = alpha
         self.gamma = gamma
         self.q_table = {}
+        if file_name is not None:
+            path = os.path.join("q_tables", file_name)
+            with open(path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line == "":
+                        continue
+                    # Replacing <Suite.RED: 1> with Suite.RED, Suite.BLUE, etc.
+                    line = line.replace("<Suite.RED: 1>", "Suite.RED")
+                    line = line.replace("<Suite.BLUE: 2>", "Suite.BLUE")
+                    line = line.replace("<Suite.GREEN: 3>", "Suite.GREEN")
+                    line = line.replace("<Suite.YELLOW: 4>", "Suite.YELLOW")
+                    splits = line.split(": ")
+                    state = splits[0]
+                    q_values = ": ".join(splits[1:])
+                    # print("evaling...")
+                    state = eval(state)
+                    # print("evaling q_values...")
+                    q_values = eval(q_values)
+                    self.q_table[state] = q_values
 
     def get_q_value(self, state: tuple, action: tuple) -> float:
         if state not in self.q_table:
@@ -238,10 +291,10 @@ class Agent:
         returning += state[0]
         # More cards in the agent's hand is worse.
         returning -= state[2] * 2
-        playable_cards = 0 # Get the number of playable cards.
-        jackss = 0 # Get the number of J in the agent's hand.
-        eights = 0 # Get the number of 8 in the agent's hand.
-        swaps = 0 # Get the number of 1 in the agent's hand.
+        playable_cards = 0  # Get the number of playable cards.
+        jackss = 0  # Get the number of J in the agent's hand.
+        eights = 0  # Get the number of 8 in the agent's hand.
+        swaps = 0  # Get the number of 1 in the agent's hand.
         top = Card.from_tuple(state[1])
         for card in state[3]:
             if card[0] == top.number or card[1] == top.suite:
@@ -260,15 +313,15 @@ class Agent:
         # Get the number of 1 in the agent's hand.
         if swaps == 1:
             returning += 5
-        
+
         return returning
 
 
 class AgentPlayer:
-    def __init__(self, name: str):
+    def __init__(self, name: str, file_name: str | None = None):
         self.name = name
         self.hand: list[Card] = []
-        self.agent = Agent()
+        self.agent = Agent(file_name=file_name)
         self.last_state = None
         self.last_action = None
 
@@ -287,7 +340,12 @@ class AgentPlayer:
         draw_action = ()
         possible_actions = [draw_action]
         for card in self.hand:
-            if card.suite == top.suite or card.number == top.number or card.number == 8 or card.number == 1:
+            if (
+                card.suite == top.suite
+                or card.number == top.number
+                or card.number == 8
+                or card.number == 1
+            ):
                 suites = []
                 if card.number != 8 and card.number != 1:
                     suites.append(card.suite)
@@ -345,7 +403,7 @@ class AgentPlayer:
             self.agent.reward(new_state),
             new_state,
         )
-    
+
     def write_q_table(self, file_name: str = "q_table.txt"):
         path = os.path.join("q_tables", file_name)
         with open(path, "w+") as f:
@@ -355,15 +413,17 @@ class AgentPlayer:
     def __str__(self):
         return f"{self.name}: {self.hand}"
 
+
 import os
 
 if __name__ == "__main__":
     player1 = AgentPlayer("Player 1")
+    player1 = AgentPlayer("Player 1", "q_table_mini.txt")
     # player2 = AgentPlayer("Player 2")
     player2 = RandomPlayer("Player 2")
     p1_wins = 0
     p2_wins = 0
-    for _ in range(10000):
+    for _ in range(1000):
         game = Game(player1, player2)
         winner = game.start()
         if winner == 1:
@@ -374,6 +434,5 @@ if __name__ == "__main__":
     print(f"Player 2 wins: {p2_wins}")
     # p1 win %
     print(f"Player 1 win %: {p1_wins / (p1_wins + p2_wins)}")
-    player1.write_q_table("q_table11.txt")
+    player1.write_q_table("q_table_mini.txt")
     # player2.write_q_table("q_table22.txt")
-
