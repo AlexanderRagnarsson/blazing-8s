@@ -21,6 +21,7 @@ The rules of the game are as follows:
 import random
 from enum import Enum
 from typing import Self
+import pickle
 
 possible_cards = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13]
 
@@ -46,7 +47,9 @@ class Card:
         return f"{self.suite.name if self.suite is not None else None} {number[self.number] if self.number in number else self.number}"
 
     def to_tuple(self):
-        return (self.number, self.suite)
+        if self.suite is None:
+            return (self.number, 0)
+        return (self.number, self.suite.value)
 
     @staticmethod
     def from_tuple(tup: tuple):
@@ -137,6 +140,7 @@ class Game:
         self.player2 = player2
         self.current_player = player1
         self.top = get_random_card()
+        self.turns = 0
 
     def start(self):
         for _ in range(5):
@@ -147,6 +151,10 @@ class Game:
             # print(f"It's {self.current_player.name}'s turn.")
             # print(f"The top card is {self.top}")
             self.turn()
+            self.turns += 1
+            if self.turns > 1000:
+                print("Too many turns!")
+                return 0
             if len(self.current_player.hand) == 0:
                 print(f"{self.current_player.name} wins!")
                 if self.current_player == self.player1:
@@ -162,12 +170,13 @@ class Game:
         other_player = (
             self.player1 if self.current_player == self.player2 else self.player2
         )
+        curr_player = self.current_player
         while not card_played:
-            card = self.current_player.choose_card(
+            card = curr_player.choose_card(
                 self.top, len(other_player.hand), not drew
             )
             if card is not None:
-                self.current_player.play(card)
+                curr_player.play(card)
                 self.top = self.apply_card_effect(card)
                 card_played = True
             elif drew:
@@ -175,8 +184,8 @@ class Game:
             else:
                 self.current_player.draw()
                 drew = True
-            if isinstance(self.current_player, AgentPlayer):
-                self.current_player.update_reward(
+            if isinstance(curr_player, AgentPlayer):
+                curr_player.update_reward(
                     self.top, len(other_player.hand), drew
                 )
 
@@ -210,9 +219,9 @@ class Game:
 class Agent:
     def __init__(
         self,
-        epsilon: float = 0.1,
+        epsilon: float = 0.01,
         alpha: float = 0.5,
-        gamma: float = 0.9,
+        gamma: float = 0.95,
         file_name: str | None = None,
     ):
         self.epsilon = epsilon
@@ -221,36 +230,32 @@ class Agent:
         self.q_table = {}
         if file_name is not None:
             path = os.path.join("q_tables", file_name)
-            with open(path, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line == "":
-                        continue
-                    # Replacing <Suite.RED: 1> with Suite.RED, Suite.BLUE, etc.
-                    line = line.replace("<Suite.RED: 1>", "Suite.RED")
-                    line = line.replace("<Suite.BLUE: 2>", "Suite.BLUE")
-                    line = line.replace("<Suite.GREEN: 3>", "Suite.GREEN")
-                    line = line.replace("<Suite.YELLOW: 4>", "Suite.YELLOW")
-                    splits = line.split(": ")
-                    state = splits[0]
-                    q_values = ": ".join(splits[1:])
-                    # print("evaling...")
-                    state = eval(state)
-                    # print("evaling q_values...")
-                    q_values = eval(q_values)
-                    self.q_table[state] = q_values
+            with open(path, "rb") as f:
+                self.q_table = pickle.load(f)
 
     def get_q_value(self, state: tuple, action: tuple) -> float:
-        if state not in self.q_table:
-            self.q_table[state] = {}
-        if action not in self.q_table[state]:
-            self.q_table[state][action] = 0
-        return self.q_table[state][action]
+        # if state not in self.q_table:
+        #     self.q_table[state] = {}
+        # if action not in self.q_table[state]:
+        #     self.q_table[state][action] = 0
+        # return self.q_table[state][action]
+        sorting_indices = self.get_sorting_indices(state)
+        optimized_state = self.optimize_state(state, sorting_indices)
+        if optimized_state not in self.q_table:
+            self.q_table[optimized_state] = {}
+        optimized_action = self.optimize_action(action, sorting_indices)
+        if optimized_action not in self.q_table[optimized_state]:
+            self.q_table[optimized_state][optimized_action] = 0
+        return self.q_table[optimized_state][optimized_action]
 
     def update_q_value(
         self, state: tuple, action: tuple, reward: float, next_state: tuple
     ) -> None:
         predict = self.get_q_value(state, action)
+        sorting_indices = self.get_sorting_indices(state)
+        state = self.optimize_state(state, sorting_indices)
+        action = self.optimize_action(action, sorting_indices)
+        next_state = self.optimize_state(next_state, sorting_indices)
         if next_state not in self.q_table:
             self.q_table[next_state] = {}
         target = reward + self.gamma * max(self.q_table[next_state].values(), default=0)
@@ -269,6 +274,34 @@ class Agent:
                 if self.get_q_value(state, action) == max_q_value
             ]
             return random.choice(best_actions)
+    
+    def get_sorting_indices(self, state):
+        suite_counts = [0 for _ in range(5)]
+        for row in state[3]:
+            for i in range(5):
+                suite_counts[i] += row[i]
+        
+        sorting_indices = sorted(range(len(suite_counts)), key=lambda k: suite_counts[k])
+        return sorting_indices
+
+
+    def optimize_state(self, state, sorting_indices):
+        top_suite = state[1][1]
+        # print(sorting_indices)
+        new_top_suite = sorting_indices.index(top_suite)
+
+        new_hand = []
+        for card in state[3]:
+            new_card = []
+            for i in range(4):
+                new_card.append(card[sorting_indices[i]])
+            new_hand.append(tuple(new_card))        
+        return (state[0], (state[1][0], new_top_suite), state[2], tuple(new_hand), state[4])
+    
+    def optimize_action(self, action, sorting_indices):
+        if action == ():
+            return ()
+        return (action[0], sorting_indices.index(action[1]))
 
     def reward(self, state: list) -> float:
         """
@@ -352,7 +385,7 @@ class AgentPlayer:
                 else:
                     suites = possible_suite
                 for suite in suites:
-                    play_action = (card.number, suite)
+                    play_action = (card.number, suite.value if suite is not None else 0)
                     if play_action not in possible_actions:
                         possible_actions.append(play_action)
         action = self.agent.choose_action(state, possible_actions)
@@ -383,9 +416,10 @@ class AgentPlayer:
         hand_state = [[0 for _ in range(5)] for _ in range(13)]
         for card in self.hand:
             if card.suite is not None:
-                hand_state[card.number - 1][card.suite.value - 1] += 1
+                hand_state[card.number - 1][card.suite.value] += 1
             else:
-                hand_state[card.number - 1][4] += 1
+                hand_state[card.number - 1][0] += 1
+
         return tuple(tuple(row) for row in hand_state)
 
     def choose_color(self) -> str:
@@ -406,33 +440,38 @@ class AgentPlayer:
 
     def write_q_table(self, file_name: str = "q_table.txt"):
         path = os.path.join("q_tables", file_name)
-        with open(path, "w+") as f:
-            for key, value in self.agent.q_table.items():
-                f.write(f"{key}: {value}\n")
+        # with open(path, "w+") as f:
+        #     for key, value in self.agent.q_table.items():
+        #         f.write(f"{key}: {value}\n")
+        with open(path, "wb+") as f:
+            pickle.dump(self.agent.q_table, f)
 
     def __str__(self):
         return f"{self.name}: {self.hand}"
 
 
 import os
+# import pandas as pd
+# import matplotlib.pyplot as plt
 
 if __name__ == "__main__":
     player1 = AgentPlayer("Player 1")
-    player1 = AgentPlayer("Player 1", "q_table_mini.txt")
+    player1 = AgentPlayer("Player 1", "q_table_mini_01e095g.bin")
+    # player1 = AgentPlayer("Player 1", "q_table_mini_01e.bin")
     # player2 = AgentPlayer("Player 2")
     player2 = RandomPlayer("Player 2")
     p1_wins = 0
     p2_wins = 0
-    for _ in range(1000):
+    for _ in range(10000):
         game = Game(player1, player2)
         winner = game.start()
         if winner == 1:
             p1_wins += 1
-        else:
+        elif winner == 2:
             p2_wins += 1
     print(f"Player 1 wins: {p1_wins}")
     print(f"Player 2 wins: {p2_wins}")
     # p1 win %
     print(f"Player 1 win %: {p1_wins / (p1_wins + p2_wins)}")
-    player1.write_q_table("q_table_mini.txt")
+    player1.write_q_table("q_table_mini_01e095g.bin")
     # player2.write_q_table("q_table22.txt")
