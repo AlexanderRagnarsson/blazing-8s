@@ -60,7 +60,7 @@ def get_random_card():
 class Player:
     def __init__(self, name: str):
         self.name = name
-        self.hand = []
+        self.hand: list[Card] = []
     
     def draw(self):
         card = get_random_card()
@@ -100,6 +100,17 @@ class Player:
     def __str__(self):
         return f"{self.name}: {self.hand}"
 
+class RandomPlayer(Player):
+    def choose_card(self, top: Card, enemy_hand_length: int, drew: bool) -> Card:
+        playable_cards = [None]
+        for card in self.hand:
+            if card.number == 8:
+                suite = random.choice(possible_suite)
+                card.suite = suite
+            if card.suite == top.suite or card.number == top.number or card.number == 8 or card.number == 1:
+                playable_cards.append(card)
+        return random.choice(playable_cards)
+
 class Game:
     def __init__(self, player1: Player, player2: Player):
         self.player1 = player1
@@ -108,7 +119,7 @@ class Game:
         self.top = get_random_card()
 
     def start(self):
-        for i in range(5):
+        for _ in range(5):
             self.player1.draw()
             self.player2.draw()
         self.top = get_random_card()
@@ -118,6 +129,10 @@ class Game:
             self.turn()
             if len(self.current_player.hand) == 0:
                 print(f"{self.current_player.name} wins!")
+                if self.current_player == self.player1:
+                    return 1
+                else:
+                    return 2
                 break
             self.switch_player()
 
@@ -252,7 +267,7 @@ class Agent:
 class AgentPlayer:
     def __init__(self, name: str):
         self.name = name
-        self.hand = []
+        self.hand: list[Card] = []
         self.agent = Agent()
         self.last_state = None
         self.last_action = None
@@ -283,6 +298,7 @@ class AgentPlayer:
                     if play_action not in possible_actions:
                         possible_actions.append(play_action)
         action = self.agent.choose_action(state, possible_actions)
+        self.last_action = action
         if action == draw_action:
             return None
         idx = -1
@@ -343,10 +359,21 @@ import os
 
 if __name__ == "__main__":
     player1 = AgentPlayer("Player 1")
-    player2 = AgentPlayer("Player 2")
-    for _ in range(10):
+    # player2 = AgentPlayer("Player 2")
+    player2 = RandomPlayer("Player 2")
+    p1_wins = 0
+    p2_wins = 0
+    for _ in range(10000):
         game = Game(player1, player2)
-        game.start()
+        winner = game.start()
+        if winner == 1:
+            p1_wins += 1
+        else:
+            p2_wins += 1
+    print(f"Player 1 wins: {p1_wins}")
+    print(f"Player 2 wins: {p2_wins}")
+    # p1 win %
+    print(f"Player 1 win %: {p1_wins / (p1_wins + p2_wins)}")
     player1.write_q_table("q_table11.txt")
-    player2.write_q_table("q_table22.txt")
+    # player2.write_q_table("q_table22.txt")
 
