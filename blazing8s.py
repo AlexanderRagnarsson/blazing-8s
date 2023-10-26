@@ -226,6 +226,7 @@ class Game:
         self.player1 = player1
         self.player2 = player2
         self.current_player = player1 if random.random() < 0.5 else player2
+        # self.current_player = player1
         self.top = get_random_card()
         self.turns = 0
         self.verbose = verbose
@@ -365,8 +366,8 @@ class Agent:
             print(f"That is {len(to_delete) / len(self.q_table) * 100}%")
             # Display a histogram of the hand sizes.
             hand_sizes = [k[2] for k in self.q_table]
-            plt.hist(hand_sizes, bins=max(hand_sizes) - min(hand_sizes))
-            plt.show()
+            # plt.hist(hand_sizes, bins=max(hand_sizes) - min(hand_sizes))
+            # plt.show()
             for k in to_delete:
                 del self.q_table[k]
 
@@ -511,16 +512,16 @@ class Agent:
             # print()
             returning += playable_cards
             # Get the number of J in the agent's hand.
-            returning += jackss * 6
+            returning += jackss * 3
             # Get the number of 8 in the agent's hand.
-            returning += eights * 5
+            returning += eights * 2
             # Get the number of 1 in the agent's hand.
             if swaps == 1:
-                returning += 10
+                returning += 5
 
             # If the enemy agent didn't play last, that's good.
             if not state[5]:
-                returning += 10
+                returning += 4
             else:
                 pass
             return returning
@@ -686,8 +687,8 @@ class BetterAgentPlayer(AgentPlayer):
 
         action = self.agent.choose_action(state, possible_actions)
 
-        # # IF the agent chose to play a Swap, 8, or J, let them choose between playing it or drawing.
-        if action[0] in [1, 11]:
+        # IF the agent chose to play a Swap, 8, or J, let them choose between playing it or drawing.
+        if action[0] in [1]:
             possible_actions.append(draw_action)
             action = self.agent.choose_action(state, possible_actions)
 
@@ -728,13 +729,14 @@ if __name__ == "__main__":
     # epsilons = [0.02, 0.015, 0.01]
     # epsilons = [0.02, 0.01]
     # gammas = [0.97, 0.98, 0.99]
-    file_prefix = "q_table_draw_or_action_"
-    training = True
-    gammas = [0.975]
-    epsilons = [0.9 if training else 0.005988571720948768]
-    epsilon_multiplier = 0.995
+    file_prefix = "q_table_batch_test_epsilons_3_"
+    training = False
+    gammas = [1]
+    epsilons = [0.04]
+    # epsilon_multiplier = 0.995
+    epsilon_multiplier = 0.999
     # gammas = [1]
-    alphas = [0.4 if training else 0]
+    alphas = [0.35]
     best_win_percent = 0
     best_epsilon = None
     best_gamma = None
@@ -760,13 +762,22 @@ if __name__ == "__main__":
             for alpha in alphas:
                 print(f"epsilon: {original_epsilon}, gamma: {gamma}, alpha: {alpha}")
                 try:
-                    player1 = BetterAgentPlayer(
-                        "Player 1",
-                        alpha=alpha,
-                        gamma=gamma,
-                        epsilon=original_epsilon,
-                        file_name=f"{file_prefix}{original_epsilon}e{gamma}g{alpha}a.bin",
-                    )
+                    if training:
+                        player1 = BetterAgentPlayer(
+                            "Player 1",
+                            alpha=alpha,
+                            gamma=gamma,
+                            epsilon=original_epsilon,
+                            file_name=f"{file_prefix}_simple_strategy_{original_epsilon}e{gamma}g{alpha}a.bin",
+                        )
+                    else:
+                        player1 = BetterAgentPlayer(
+                            "Player 1",
+                            alpha=0,
+                            gamma=gamma,
+                            epsilon=0,
+                            file_name=f"{file_prefix}_simple_strategy_{original_epsilon}e{gamma}g{alpha}a.bin",
+                        )
                 except FileNotFoundError as e:
                     print("Failed to load q table")
                     player1 = BetterAgentPlayer(
@@ -783,9 +794,9 @@ if __name__ == "__main__":
                     player2 = Player("Player 2")
                 total_p1_wins = 0
                 total_p2_wins = 0
-                outer = 2000
-                inner = 100
-                epsilon = original_epsilon
+                outer = 1000
+                inner = 300
+                epsilon = original_epsilon if training else 0
                 for j in range(outer):
                     epsilon = epsilon * epsilon_multiplier
                     player1.agent.epsilon = epsilon
@@ -810,31 +821,32 @@ if __name__ == "__main__":
                     total_p2_wins += p2_wins
                     win_percent = total_p1_wins / (total_p1_wins + total_p2_wins)
                     curr_win_percent = p1_wins / (p1_wins + p2_wins)
-                    if win_percent > best_win_percent:
-                        best_win_percent = win_percent
-                        best_epsilon = epsilon
-                        best_gamma = gamma
-                        best_alpha = alpha
                     df = df._append(
                         {
                             "games": (j + 1) * inner,
-                            "win_percent": curr_win_percent,
-                            "epsilon": epsilon,
+                            "win_percent": win_percent,
+                            "epsilon": original_epsilon,
                             "gamma": gamma,
                             "alpha": alpha,
                             "q_table_len": len(player1.agent.q_table),
                         },
                         ignore_index=True,
                     )
+                win_percent = total_p1_wins / (total_p1_wins + total_p2_wins)
+                if win_percent > best_win_percent:
+                    best_win_percent = win_percent
+                    best_epsilon = original_epsilon
+                    best_gamma = gamma
+                    best_alpha = alpha
                 print(
                     f"Player 1 total win %: {total_p1_wins/(total_p1_wins + total_p2_wins)}"
                 )
-                print(f"epsilon: {epsilon}, gamma: {gamma}, alpha: {alpha}")
+                print(f"epsilon: {original_epsilon}, gamma: {gamma}, alpha: {alpha}")
                 if training:
                     print("Writing into file")
                     print(f"{file_prefix}{original_epsilon}e{gamma}g{alpha}a.bin")
                     player1.write_q_table(
-                        f"{file_prefix}{original_epsilon}e{gamma}g{alpha}a.bin"
+                        f"{file_prefix}_simple_strategy_{original_epsilon}e{gamma}g{alpha}a.bin"
                     )
                     print("Q table written into file")
                     print("Q table hits: ", player1.agent.q_table_hits)
@@ -857,9 +869,20 @@ if __name__ == "__main__":
         # print into file
         ps.print_stats()
 
-    df.plot(x="games", y="win_percent")
-    df.plot(x="games", y="q_table_len")
+    # grouped_epsilons = df.groupby("epsilon")
+    grouped_data = df.groupby(["epsilon", "alpha", "gamma"])
+    plt.figure()
+    for key, group in grouped_data:
+        plt.plot(group["games"], group["win_percent"], label=key)
+    plt.xlabel("Games")
+    plt.ylabel("Win %")
+    plt.legend()
+    plt.grid(True)
     plt.show()
+
+    # df.plot(x="games", y="win_percent")
+    # df.plot(x="games", y="q_table_len")
+    # plt.show()
 
     # player1.write_q_table("q_table_mini_01e095g.bin")
     # player1.write_q_table("q_table_2_1e975g4a_1.bin")
