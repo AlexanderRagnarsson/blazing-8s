@@ -353,6 +353,7 @@ class Agent:
         self.q_table = {}
         self.q_table_attempts = 0
         self.q_table_hits = 0
+        self.file_name = file_name
         if file_name is not None:
             path = os.path.join("q_tables", file_name)
             with open(path, "rb") as f:
@@ -394,10 +395,12 @@ class Agent:
     def update_q_value(self, state: tuple, action: tuple, next_state: tuple) -> None:
         reward = self.reward(next_state)
         predict = self.get_q_value(state, action)
+
         sorting_indices = self.get_sorting_indices(state)
         state = self.optimize_state(state, sorting_indices)
         action = self.optimize_action(action, sorting_indices)
         next_state = self.optimize_state(next_state, sorting_indices)
+
         if next_state not in self.q_table:
             self.q_table[next_state] = {}
         target = reward + self.gamma * max(self.q_table[next_state].values(), default=0)
@@ -430,17 +433,6 @@ class Agent:
 
     @lru_cache(maxsize=1000)
     def optimize_state(self, state, sorting_indices):
-        # new_hand = []
-        # for j, card in enumerate(state[3]):
-        #     new_card = []
-        #     for i in sorting_indices:
-        #         value = card[i]
-        #         if value == 0:
-        #             continue
-        #         new_card.append(value)
-        #     new_hand.append(tuple(new_card))
-        # new_hand = tuple(new_hand)
-
         new_hand = tuple(state[3][j][i] for i in sorting_indices for j in range(13))
 
         new_state = list(state)
@@ -536,20 +528,110 @@ class Agent:
         return inner(state)
 
 
+class DoubleQTableAgent(Agent):
+    def __init__(
+        self,
+        epsilon: float = 0.01,
+        alpha: float = 0.5,
+        gamma: float = 0.95,
+        file_name: str | None = None,
+    ):
+        self.epsilon = epsilon
+        self.alpha = alpha
+        self.gamma = gamma
+        self.q_table1 = {}
+        self.q_table2 = {}
+        self.q_table_attempts = 0
+        self.q_table_hits = 0
+        self.file_name = file_name
+        if file_name is not None:
+            print(self.file_name)
+            with open(f"{file_name}_1", "rb") as f:
+                self.q_table1 = pickle.load(f)
+            with open(f"{file_name}_2", "rb") as f:
+                self.q_table2 = pickle.load(f)
+
+    def get_q_value(self, state: tuple, action: tuple) -> float:
+        sorting_indices = self.get_sorting_indices(state)
+        state = self.optimize_state(state, sorting_indices)
+        if random.random() < 0.5:
+            q_table = self.q_table1
+        else:
+            q_table = self.q_table2
+        if state not in q_table:
+            q_table[state] = {}
+        if action not in q_table[state]:
+            q_table[state][action] = 0
+        return q_table[state][action]
+
+    def update_q_value(self, state: tuple, action: tuple, next_state: tuple) -> None:
+        reward = self.reward(next_state)
+        predict = self.get_q_value(state, action)
+
+        sorting_indices = self.get_sorting_indices(state)
+        state = self.optimize_state(state, sorting_indices)
+        action = self.optimize_action(action, sorting_indices)
+        next_state = self.optimize_state(next_state, sorting_indices)
+
+        if random.random() < 0.5:
+            q_table = self.q_table1
+        else:
+            q_table = self.q_table2
+        if next_state not in q_table:
+            q_table[next_state] = {}
+        if state not in q_table:
+            q_table[state] = {}
+        if action not in q_table[state]:
+            q_table[state][action] = 0
+        target = reward + self.gamma * max(q_table[next_state].values(), default=0)
+        q_table[state][action] += self.alpha * (target - predict)
+
+    def choose_action(self, state: tuple, possible_actions: list) -> tuple:
+        sorting_indices = self.get_sorting_indices(state)
+        state = self.optimize_state(state, sorting_indices)
+
+        if random.random() < self.epsilon:
+            return random.choice(possible_actions)
+        else:
+            q_table = self.q_table1.get(state, {})
+            for k, v in self.q_table2.get(state, {}).items():
+                if k not in q_table:
+                    q_table[k] = v
+                else:
+                    q_table[k] += v
+            best_actions = []
+            best_action_value = None
+            for action in possible_actions:
+                action = self.optimize_action(action, sorting_indices)
+                if action not in q_table:
+                    av = 0
+                else:
+                    av = q_table[action]
+                if best_action_value is None or av > best_action_value:
+                    best_action_value = av
+                    best_actions = [action]
+                elif av == best_action_value:
+                    best_actions.append(action)
+            return random.choice(best_actions)
+
+    def write_q_table(self, file_name: str | None = None):
+        if file_name is None:
+            file_name = self.file_name
+        with open(f"{file_name}_1", "wb+") as f:
+            pickle.dump(self.q_table1, f)
+        with open(f"{file_name}_2", "wb+") as f:
+            pickle.dump(self.q_table2, f)
+
+
 class AgentPlayer:
     def __init__(
         self,
         name: str,
-        file_name: str | None = None,
-        alpha: float = 0.5,
-        gamma: float = 0.95,
-        epsilon: float = 0.1,
+        agent: Agent,
     ):
         self.name = name
         self.hand: list[Card] = []
-        self.agent = Agent(
-            alpha=alpha, gamma=gamma, epsilon=epsilon, file_name=file_name
-        )
+        self.agent = agent
         self.last_state = None
         self.last_action = None
 
@@ -637,14 +719,6 @@ class AgentPlayer:
             new_state,
         )
 
-    def write_q_table(self, file_name: str = "q_table.txt"):
-        path = os.path.join("q_tables", file_name)
-        # with open(path, "w+") as f:
-        #     for key, value in self.agent.q_table.items():
-        #         f.write(f"{key}: {value}\n")
-        with open(path, "wb+") as f:
-            pickle.dump(self.agent.q_table, f)
-
     def __str__(self):
         return f"{self.name}: {self.hand}"
 
@@ -729,14 +803,14 @@ if __name__ == "__main__":
     # epsilons = [0.02, 0.015, 0.01]
     # epsilons = [0.02, 0.01]
     # gammas = [0.97, 0.98, 0.99]
-    file_prefix = "q_table_batch_test_epsilons_3_"
-    training = False
-    gammas = [1]
-    epsilons = [0.04]
+    file_prefix = "double_q_table_"
+    training = True
     # epsilon_multiplier = 0.995
     epsilon_multiplier = 0.999
-    # gammas = [1]
+    gammas = [1]
+    epsilons = [0.04]
     alphas = [0.35]
+
     best_win_percent = 0
     best_epsilon = None
     best_gamma = None
@@ -763,26 +837,25 @@ if __name__ == "__main__":
                 print(f"epsilon: {original_epsilon}, gamma: {gamma}, alpha: {alpha}")
                 try:
                     if training:
-                        player1 = BetterAgentPlayer(
-                            "Player 1",
+                        agent = DoubleQTableAgent(
+                            epsilon=original_epsilon,
                             alpha=alpha,
                             gamma=gamma,
-                            epsilon=original_epsilon,
                             file_name=f"{file_prefix}_simple_strategy_{original_epsilon}e{gamma}g{alpha}a.bin",
                         )
                     else:
-                        player1 = BetterAgentPlayer(
-                            "Player 1",
-                            alpha=0,
+                        agent = DoubleQTableAgent(
+                            epsilon=original_epsilon,
+                            alpha=alpha,
                             gamma=gamma,
-                            epsilon=0,
                             file_name=f"{file_prefix}_simple_strategy_{original_epsilon}e{gamma}g{alpha}a.bin",
                         )
                 except FileNotFoundError as e:
                     print("Failed to load q table")
-                    player1 = BetterAgentPlayer(
-                        "Player 1", alpha=alpha, gamma=gamma, epsilon=original_epsilon
+                    agent = DoubleQTableAgent(
+                        epsilon=original_epsilon, alpha=alpha, gamma=gamma
                     )
+                player1 = BetterAgentPlayer("Player 1", agent=agent)
                 # player1 = Player("Player 1")
                 # player1.agent = Agent()
                 # table_len = len(player1.agent.q_table)
@@ -794,13 +867,18 @@ if __name__ == "__main__":
                     player2 = Player("Player 2")
                 total_p1_wins = 0
                 total_p2_wins = 0
-                outer = 1000
+                outer = 100
                 inner = 300
                 epsilon = original_epsilon if training else 0
                 for j in range(outer):
                     epsilon = epsilon * epsilon_multiplier
                     player1.agent.epsilon = epsilon
-                    table_len = len(player1.agent.q_table)
+                    if isinstance(agent, DoubleQTableAgent):
+                        table_len = len(player1.agent.q_table1) + len(
+                            player1.agent.q_table2
+                        )
+                    else:
+                        table_len = len(agent.q_table)
                     p1_wins = 0
                     p2_wins = 0
                     for i in range(inner):
@@ -813,10 +891,14 @@ if __name__ == "__main__":
                         elif winner == 2:
                             p2_wins += 1
                     win_percent = p1_wins / (p1_wins + p2_wins)
-                    extra_in_table = len(player1.agent.q_table) - table_len
-                    # print(f"First {(j + 1)*inner} games")
-                    # print(f"Extra in table: {extra_in_table}")
-                    # print(f"Player 1 win %: {win_percent}")
+                    if isinstance(agent, DoubleQTableAgent):
+                        extra_in_table = (
+                            len(player1.agent.q_table1)
+                            + len(player1.agent.q_table2)
+                            - table_len
+                        )
+                    else:
+                        extra_in_table = len(agent.q_table) - table_len
                     total_p1_wins += p1_wins
                     total_p2_wins += p2_wins
                     win_percent = total_p1_wins / (total_p1_wins + total_p2_wins)
@@ -828,7 +910,7 @@ if __name__ == "__main__":
                             "epsilon": original_epsilon,
                             "gamma": gamma,
                             "alpha": alpha,
-                            "q_table_len": len(player1.agent.q_table),
+                            "q_table_len": table_len + extra_in_table,
                         },
                         ignore_index=True,
                     )
@@ -845,16 +927,16 @@ if __name__ == "__main__":
                 if training:
                     print("Writing into file")
                     print(f"{file_prefix}{original_epsilon}e{gamma}g{alpha}a.bin")
-                    player1.write_q_table(
+                    agent.write_q_table(
                         f"{file_prefix}_simple_strategy_{original_epsilon}e{gamma}g{alpha}a.bin"
                     )
                     print("Q table written into file")
-                    print("Q table hits: ", player1.agent.q_table_hits)
-                    print("Q table attempts: ", player1.agent.q_table_attempts)
-                    print(
-                        "Q table hit %: ",
-                        player1.agent.q_table_hits / player1.agent.q_table_attempts,
-                    )
+                    # print("Q table hits: ", player1.agent.q_table_hits)
+                    # print("Q table attempts: ", player1.agent.q_table_attempts)
+                    # print(
+                    #     "Q table hit %: ",
+                    #     player1.agent.q_table_hits / player1.agent.q_table_attempts,
+                    # )
     print(
         f"Best epsilon: {best_epsilon}, best gamma: {best_gamma}, best alpha: {best_alpha}"
     )
