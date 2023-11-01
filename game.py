@@ -7,6 +7,7 @@ import random
 from enum import Enum
 from typing import Self
 
+
 class Suite(Enum):
     RED = 1
     BLUE = 2
@@ -29,6 +30,7 @@ class Suite(Enum):
         else:
             raise Exception("Invalid suite")
 
+
 class Card:
     def __init__(self, value: int, suite: Suite | None):
         self.value = value
@@ -38,6 +40,7 @@ class Card:
         # color = {1: "Red", 2: "Blue", 3: "Green", 4: "Yellow"}
         number = {1: "Swap", 11: "J", 13: "K"}
         return f"{self.suite.name if self.suite is not None else 'None':7} {number[self.value] if self.value in number else self.value}"
+
 
 class Skip:
     def __init__(self):
@@ -58,7 +61,7 @@ class Draw:
 
     def __str__(self):
         return "Draw"
-    
+
     def __eq__(self, other):
         if isinstance(other, Draw):
             return True
@@ -252,6 +255,7 @@ def sort_hand(hand: list[Card | Skip | Draw]) -> list[Card | Skip | Draw]:
         ),
     )
 
+
 class TUIPlayer(Player):
     """A way to play the game using a text based interface"""
 
@@ -276,6 +280,7 @@ class TUIPlayer(Player):
         playable_cards = sort_hand(playable_cards)
         for i, card in enumerate(playable_cards):
             print(f"{i+1}. {card}")
+
         def get_playable():
             while True:
                 try:
@@ -286,6 +291,7 @@ class TUIPlayer(Player):
                 except Exception as e:
                     print(e)
                     print("Invalid choice")
+
         play = get_playable()
         if isinstance(play, Card) and play.value == 8:
             while True:
@@ -299,6 +305,12 @@ class TUIPlayer(Player):
                 except Exception as e:
                     print(e)
         return play
+
+
+class AgentPlayer(Player):
+    def __init__(self, name):
+        super().__init__(name)
+        # TODO: Add agent from blazing8s.py
 
 
 if __name__ == "__main__":
